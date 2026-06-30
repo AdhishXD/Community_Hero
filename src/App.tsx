@@ -52,7 +52,6 @@ import ReportIssueModal from "./components/ReportIssueModal";
 import LeaderboardPanel from "./components/LeaderboardPanel";
 import StatsPanel from "./components/StatsPanel";
 import ProfileModal from "./components/ProfileModal";
-import SecurityCompliancePanel from "./components/SecurityCompliancePanel";
 
 // Haversine formula helper for distance checking at module level
 export const calculateDistanceInKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -141,8 +140,8 @@ export const getJurisdiction = (lat: number, lng: number) => {
 };
 
 export default function App() {
-  // Navigation: "map" | "impact" | "leaderboard" | "security"
-  const [activeTab, setActiveTab] = useState<"map" | "impact" | "leaderboard" | "security">("map");
+  // Navigation: "map" | "impact" | "leaderboard"
+  const [activeTab, setActiveTab] = useState<"map" | "impact" | "leaderboard">("map");
   const [issues, setIssues] = useState<Issue[]>([]);
   const [leaderboard, setLeaderboard] = useState<User[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -1295,18 +1294,7 @@ ${j.city} Community Hero Network
             Leaderboards
           </button>
 
-          <button
-            id="tab-security"
-            onClick={() => setActiveTab("security")}
-            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold tracking-wide transition-all ${
-              activeTab === "security"
-                ? "bg-white text-[#6d28d9] shadow-sm border border-slate-200/50"
-                : "text-slate-600 hover:text-slate-800"
-            }`}
-          >
-            <ShieldCheck className="w-3.5 h-3.5" />
-            Gov Security & Trust
-          </button>
+
         </div>
 
         {/* Global FAB Trigger */}
@@ -1951,28 +1939,7 @@ ${j.city} Community Hero Network
             </motion.div>
           )}
 
-          {activeTab === "security" && (
-            <motion.div
-              key="security-tab"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-            >
-              <SecurityCompliancePanel
-                currentUser={currentUser}
-                onEraseAccount={async () => {
-                  if (currentUser) {
-                    await eraseUserAccount(currentUser.uuid);
-                    localStorage.removeItem("community_hero_uuid");
-                    setCurrentUser(null);
-                  }
-                }}
-                onTriggerToast={(title, sub, icon) => {
-                  triggerToast(title, sub, icon);
-                }}
-              />
-            </motion.div>
-          )}
+
         </AnimatePresence>
 
       </main>

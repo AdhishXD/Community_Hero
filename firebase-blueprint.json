@@ -1,0 +1,98 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Citizen profile credentials, XP, and ward details.",
+      "type": "object",
+      "properties": {
+        "uuid": { "type": "string", "description": "Unique user identity UUID" },
+        "username": { "type": "string", "description": "Unique username" },
+        "name": { "type": "string", "description": "Display name of citizen" },
+        "avatarColor": { "type": "string", "description": "Hex or class color of avatar" },
+        "xp": { "type": "number", "description": "Accumulated reputation experience points" },
+        "streak": { "type": "number", "description": "Consecutive days of civic reporting" },
+        "lastActiveDate": { "type": "string", "description": "Last ISO timestamp of user action" },
+        "isAdmin": { "type": "boolean", "description": "True if municipal official/operator" },
+        "ward": { "type": "string", "description": "Currently joined neighborhood municipal ward" },
+        "ward_auto_assign": { "type": "boolean", "description": "True if ward is auto-assigned via coordinates" },
+        "badges": {
+          "type": "array",
+          "description": "Earned citizen recognition achievement badges"
+        }
+      },
+      "required": ["uuid", "name", "xp", "streak"]
+    },
+    "Issue": {
+      "title": "Civic Issue",
+      "description": "A reported civic infrastructure hazard.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique issue alphanumeric identifier" },
+        "title": { "type": "string", "description": "Civic issue title" },
+        "description": { "type": "string", "description": "Detailed description of hazard" },
+        "imageUrl": { "type": "string", "description": "Web URL of photograph proof" },
+        "resolvedImageUrl": { "type": "string", "description": "Web URL of resolution confirmation photograph proof" },
+        "coordinates": { "type": "object", "description": "GPS coordinates of hazard location" },
+        "category": { "type": "string", "description": "Problem classification (e.g. Pothole, Water Leak)" },
+        "severity": { "type": "number", "description": "Damage intensity scale from 1 to 5" },
+        "department": { "type": "string", "description": "Responsible municipal agency" },
+        "authority": { "type": "string", "description": "Civic authority (e.g. BBMP, CCMC)" },
+        "state": { "type": "string", "description": "Indian State" },
+        "ward": { "type": "string", "description": "Municipal ward zone" },
+        "urgency": { "type": "string", "description": "Calculated priority (Low, Medium, High, Critical)" },
+        "suggestedAction": { "type": "string", "description": "AI-suggested administrative remedy" },
+        "tags": { "type": "array", "description": "Search tags" },
+        "status": { "type": "string", "description": "State (Reported, Verified, In Progress, Resolved)" },
+        "upvotes": { "type": "number", "description": "Total verification upvotes received" },
+        "upvotedBy": { "type": "array", "description": "Uuids of citizens who upvoted" },
+        "reportedBy": { "type": "string", "description": "Uuid of reporter citizen" },
+        "reportedByName": { "type": "string", "description": "Name of reporter citizen" },
+        "timestamp": { "type": "string", "description": "ISO timestamp of submission" },
+        "statusHistory": { "type": "array", "description": "List of state transitions" }
+      },
+      "required": ["id", "title", "description", "coordinates", "category", "status"]
+    },
+    "WeeklySummary": {
+      "title": "Weekly Summary",
+      "description": "Dynamic administrative weekly civic report synthesis.",
+      "type": "object",
+      "properties": {
+        "text": { "type": "string", "description": "Dynamic overview text" },
+        "generatedAt": { "type": "string", "description": "ISO timestamp of report generation" }
+      },
+      "required": ["text", "generatedAt"]
+    },
+    "CheckIn": {
+      "title": "Check In",
+      "description": "Citizen check-in verification log for active ward sync.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Check-in item unique ID" },
+        "userUuid": { "type": "string", "description": "User citizen UUID" },
+        "lat": { "type": "number", "description": "GPS latitude" },
+        "lng": { "type": "number", "description": "GPS longitude" },
+        "ward": { "type": "string", "description": "Synchronized municipal ward" },
+        "timestamp": { "type": "string", "description": "ISO timestamp of event" }
+      },
+      "required": ["id", "userUuid", "lat", "lng", "ward"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Collection of citizen user account details."
+    },
+    "/issues/{issueId}": {
+      "schema": "Issue",
+      "description": "Collection of active and historic civic hazard entries."
+    },
+    "/weeklySummary/{summaryId}": {
+      "schema": "WeeklySummary",
+      "description": "Weekly generated administrative synthesis reports."
+    },
+    "/checkIns/{checkInId}": {
+      "schema": "CheckIn",
+      "description": "Citizen coordinates check-in verification events."
+    }
+  }
+}

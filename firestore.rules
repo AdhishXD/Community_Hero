@@ -1,0 +1,44 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Users collection rules
+    match /users/{userId} {
+      allow read, write: if true;
+    }
+
+    // Issues collection rules
+    match /issues/{issueId} {
+      allow read, write: if true;
+    }
+
+    // Weekly summaries collection rules
+    match /weekly_summary/{summaryId} {
+      allow read, write: if true;
+    }
+
+    // Check-ins collection rules
+    match /check_ins/{checkInId} {
+      allow read, write: if true;
+    }
+
+    // Status history collection rules
+    match /status_history/{historyId} {
+      allow read, write: if true;
+    }
+
+    // Upvotes collection rules
+    match /upvotes/{upvoteId} {
+      allow read, write: if true;
+    }
+
+    // Badges collection rules
+    match /badges/{badgeId} {
+      allow read, write: if true;
+    }
+
+    // Default safety net: Deny all reads/writes by default for other collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

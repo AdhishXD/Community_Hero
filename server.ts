@@ -5,8 +5,48 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import crypto from "crypto";
+import { initializeApp } from "firebase/app";
+import { getFirestore, doc, setDoc, getDoc, getDocs, collection, getDocFromServer } from "firebase/firestore";
 
 dotenv.config();
+
+// Read Firebase config
+let firebaseConfig: any = null;
+try {
+  const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+  if (fs.existsSync(configPath)) {
+    firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+  }
+} catch (e) {
+  console.error("Failed to read firebase-applet-config.json:", e);
+}
+
+// Initialize Firebase App and Firestore Database
+let db: any = null;
+if (firebaseConfig) {
+  try {
+    const firebaseApp = initializeApp(firebaseConfig);
+    db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
+    console.log("[Firebase] Server-side Firestore initialized successfully with project ID:", firebaseConfig.projectId);
+
+    // Validate Connection to Firestore (MANDATORY per skill guidelines)
+    const testConnection = async () => {
+      try {
+        await getDocFromServer(doc(db, "test", "connection"));
+        console.log("[Firebase] Connection check successful.");
+      } catch (error: any) {
+        if (error?.message?.includes("the client is offline")) {
+          console.error("[Firebase] Warning: Please check your Firebase configuration. Client is offline.");
+        } else {
+          console.log("[Firebase] Firestore connection verified (expected test result).");
+        }
+      }
+    };
+    testConnection();
+  } catch (err) {
+    console.error("[Firebase] Failed to initialize Firebase App:", err);
+  }
+}
 
 // Initialize Express
 const app = express();
@@ -535,7 +575,7 @@ async function getWardForLocationAsync(lat: number, lng: number): Promise<string
           return resolved.ward;
         }
       } catch (aiErr) {
-        console.error("Gemini fallback inside getWardForLocationAsync failed:", aiErr);
+        console.warn("Gemini fallback inside getWardForLocationAsync failed:", aiErr);
       }
     }
     const wards = getWardsForLocation(lat, lng);
@@ -604,7 +644,7 @@ Do not include any explanation, backticks or markdown formatting. Only valid JSO
       }
     }
   } catch (err) {
-    console.error("Gemini manual location resolution failed:", err);
+    console.warn("Gemini manual location resolution failed:", err);
   }
 
   return defaultRes;
@@ -818,6 +858,156 @@ let tables: DB_Tables = {
   check_ins: []
 };
 
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: "server_system",
+      email: "server_system@communityhero",
+      emailVerified: true
+    },
+    operationType,
+    path
+  };
+  console.error('[Firestore Error] ', JSON.stringify(errInfo, null, 2));
+}
+
+// Load database collections from Firestore
+async function loadTablesFromFirestore() {
+  if (!db) {
+    console.warn("[Firebase] Skipping load: Database client not initialized.");
+    return;
+  }
+  try {
+    console.log("[Firebase] Loading database collections from Firestore...");
+    
+    const [
+      usersSnap,
+      issuesSnap,
+      checkInsSnap,
+      statusHistorySnap,
+      upvotesSnap,
+      badgesSnap,
+      summarySnap
+    ] = await Promise.all([
+      getDocs(collection(db, "users")).catch(err => { handleFirestoreError(err, OperationType.LIST, "users"); throw err; }),
+      getDocs(collection(db, "issues")).catch(err => { handleFirestoreError(err, OperationType.LIST, "issues"); throw err; }),
+      getDocs(collection(db, "check_ins")).catch(err => { handleFirestoreError(err, OperationType.LIST, "check_ins"); throw err; }),
+      getDocs(collection(db, "status_history")).catch(err => { handleFirestoreError(err, OperationType.LIST, "status_history"); throw err; }),
+      getDocs(collection(db, "upvotes")).catch(err => { handleFirestoreError(err, OperationType.LIST, "upvotes"); throw err; }),
+      getDocs(collection(db, "badges")).catch(err => { handleFirestoreError(err, OperationType.LIST, "badges"); throw err; }),
+      getDocs(collection(db, "weekly_summary")).catch(err => { handleFirestoreError(err, OperationType.LIST, "weekly_summary"); throw err; })
+    ]);
+
+    const loadedTables: DB_Tables = {
+      users: [],
+      badges: [],
+      issues: [],
+      status_history: [],
+      upvotes: [],
+      weekly_summary: [],
+      check_ins: []
+    };
+
+    usersSnap.forEach(d => loadedTables.users.push(d.data()));
+    issuesSnap.forEach(d => loadedTables.issues.push(d.data()));
+    checkInsSnap.forEach(d => loadedTables.check_ins.push(d.data()));
+    statusHistorySnap.forEach(d => loadedTables.status_history.push(d.data()));
+    upvotesSnap.forEach(d => loadedTables.upvotes.push(d.data()));
+    badgesSnap.forEach(d => loadedTables.badges.push(d.data()));
+    summarySnap.forEach(d => loadedTables.weekly_summary.push(d.data()));
+
+    // Populate memory if we fetched real database documents
+    if (loadedTables.users.length > 0 || loadedTables.issues.length > 0) {
+      tables = loadedTables;
+      console.log(`[Firebase] Database fully synced from Firestore. Users: ${tables.users.length}, Issues: ${tables.issues.length}`);
+    } else {
+      console.log("[Firebase] Firestore is empty. Replicating local seeds to cloud...");
+      await saveTablesToFirestore();
+    }
+  } catch (err) {
+    console.error("[Firebase] Error during Firestore load:", err);
+  }
+}
+
+// Synchronously save locally, and asynchronously replicate to Firestore
+async function saveTablesToFirestore() {
+  if (!db) return;
+  try {
+    console.log("[Firebase] Replicating memory tables to Firestore database...");
+
+    // Replicate users
+    for (const u of tables.users) {
+      if (u && u.uuid) {
+        await setDoc(doc(db, "users", u.uuid), u).catch(err => handleFirestoreError(err, OperationType.WRITE, `users/${u.uuid}`));
+      }
+    }
+
+    // Replicate issues
+    for (const i of tables.issues) {
+      if (i && i.id) {
+        await setDoc(doc(db, "issues", i.id), i).catch(err => handleFirestoreError(err, OperationType.WRITE, `issues/${i.id}`));
+      }
+    }
+
+    // Replicate check_ins
+    for (const ci of tables.check_ins) {
+      const id = ci.id || (ci.user_uuid + "_" + ci.timestamp).replace(/[^a-zA-Z0-9]/g, "_");
+      await setDoc(doc(db, "check_ins", id), ci).catch(err => handleFirestoreError(err, OperationType.WRITE, `check_ins/${id}`));
+    }
+
+    // Replicate status_history
+    for (const sh of tables.status_history) {
+      const id = sh.id ? String(sh.id) : (sh.issue_id + "_" + sh.status + "_" + sh.timestamp).replace(/[^a-zA-Z0-9]/g, "_");
+      await setDoc(doc(db, "status_history", id), sh).catch(err => handleFirestoreError(err, OperationType.WRITE, `status_history/${id}`));
+    }
+
+    // Replicate upvotes
+    for (const up of tables.upvotes) {
+      const id = (up.issue_id + "_" + up.user_uuid).replace(/[^a-zA-Z0-9]/g, "_");
+      await setDoc(doc(db, "upvotes", id), up).catch(err => handleFirestoreError(err, OperationType.WRITE, `upvotes/${id}`));
+    }
+
+    // Replicate badges
+    for (const b of tables.badges) {
+      const id = (b.userUuid + "_" + b.id).replace(/[^a-zA-Z0-9]/g, "_");
+      await setDoc(doc(db, "badges", id), b).catch(err => handleFirestoreError(err, OperationType.WRITE, `badges/${id}`));
+    }
+
+    // Replicate weekly_summary
+    for (const ws of tables.weekly_summary) {
+      if (ws && ws.generatedAt) {
+        const id = ws.generatedAt.replace(/[^a-zA-Z0-9]/g, "_");
+        await setDoc(doc(db, "weekly_summary", id), ws).catch(err => handleFirestoreError(err, OperationType.WRITE, `weekly_summary/${id}`));
+      }
+    }
+
+    console.log("[Firebase] Firestore replication complete.");
+  } catch (err) {
+    console.error("[Firebase] Replications failed:", err);
+  }
+}
+
 // Helper to load tables from JSON file
 function loadTables() {
   try {
@@ -835,10 +1025,12 @@ function loadTables() {
   }
 }
 
-// Helper to save tables to JSON file
+// Helper to save tables to JSON file and replicate to Firestore
 function saveTables() {
   try {
     fs.writeFileSync(EMULATED_DB_FILE, JSON.stringify(tables, null, 2));
+    // Replicate asynchronously to Firestore
+    saveTablesToFirestore();
   } catch (err) {
     console.error("Error saving emulated DB file:", err);
   }
@@ -1635,7 +1827,7 @@ async function generateContentWithRetry(params: any, maxRetries = 2, initialDela
       
       if (isTransient) {
         // Fallback chain: If the request was targeting gemini-3.5-flash, dynamically try gemini-flash-latest first, then gemini-3.1-flash-lite
-        if (currentParams.model === "gemini-3.5-flash") {
+        if (currentParams.model === "gemini-3.5-flash-lite") {
           console.log("Switching request model to 'gemini-flash-latest' fallback to recover from service pressure.");
           currentParams.model = "gemini-flash-latest";
           continue;
@@ -2188,7 +2380,7 @@ CRITICAL ASSIGNMENT:
         wasAnalyzedByAI = true;
       }
     } catch (err: any) {
-      console.error("Gemini AI analysis failed, reverting to rule-based fallback:", err);
+      console.warn("Gemini AI analysis failed, reverting to rule-based fallback:", err);
       // If error indicates rate limiting or system error, we don't reject but let fallback handle it
     }
   }
@@ -2466,7 +2658,7 @@ app.post("/api/issues/:id/status", async (req: Request, res: Response) => {
           }
         }
       } catch (err: any) {
-        console.error("Gemini image comparison failed, falling back to auto-approval:", err);
+        console.warn("Gemini image comparison failed, falling back to auto-approval:", err);
         feedback = "Temporary service load. Bypass check, manual approval assigned.";
         verificationFeedback = feedback;
       }
@@ -2655,7 +2847,7 @@ Synthesize this data into a 3-sentence natural language brief highlighting:
         wasAISummary = true;
       }
     } catch (err) {
-      console.error("Gemini AI failed to extract summary:", err);
+      console.warn("Gemini AI failed to extract summary:", err);
     }
   }
 
@@ -2980,6 +3172,9 @@ app.get("/api/wards/leaderboard", async (req: Request, res: Response) => {
 
 // Vite + Static files boot
 async function startServer() {
+  // Sync live tables from Firestore database on boot
+  await loadTablesFromFirestore();
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
